@@ -1,0 +1,157 @@
+Using device: cuda
+No valid existing model found or error loading. Starting training...
+Full training dataset size: 1058
+Training set size: 846
+Validation set size: 212
+Test set size: 453
+Classes found: ['fresh_apple', 'fresh_banana', 'fresh_orange', 'rotten_apple', 'rotten_banana', 'rotten_orange']
+Index to Class mapping: {0: 'fresh_apple', 1: 'fresh_banana', 2: 'fresh_orange', 3: 'rotten_apple', 4: 'rotten_banana', 5: 'rotten_orange'}
+Using 1 workers for DataLoaders.
+Full training dataset size: 1058
+Training set size: 846
+Validation set size: 212
+Test set size: 453
+Classes found: ['fresh_apple', 'fresh_banana', 'fresh_orange', 'rotten_apple', 'rotten_banana', 'rotten_orange']
+Index to Class mapping: {0: 'fresh_apple', 1: 'fresh_banana', 2: 'fresh_orange', 3: 'rotten_apple', 4: 'rotten_banana', 5: 'rotten_orange'}
+Using 1 workers for DataLoaders.
+
+Number of training batches: 27
+Number of validation batches: 7
+Target Classes: ['fresh_apple', 'fresh_banana', 'fresh_orange', 'rotten_apple', 'rotten_banana', 'rotten_orange']
+Loading ResNet50 (pretrained=True)...
+/usr/local/lib/python3.10/dist-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/usr/local/lib/python3.10/dist-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=ResNet50_Weights.IMAGENET1K_V1`. You can also use `weights=ResNet50_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+Downloading: "https://download.pytorch.org/models/resnet50-0676ba61.pth" to /root/.cache/torch/hub/checkpoints/resnet50-0676ba61.pth
+100%|██████████| 97.8M/97.8M [00:00<00:00, 188MB/s]
+ResNet50 original FC layer input features: 2048
+Replaced FC layer with output features: 6
+
+--- Starting Training ---
+
+Epoch 1/25
+----------
+/usr/local/lib/python3.10/dist-packages/torch/optim/lr_scheduler.py:62: UserWarning: The verbose parameter is deprecated. Please use get_last_lr() to access the learning rate.
+  warnings.warn(
+Epoch 1 Summary: LR: 1.0e-04 | Train Loss: 0.6421 Acc: 0.8050 | Val Loss: 0.1220 Acc: 0.9623 | Time: 21.19s
+Validation accuracy improved (0.0000 --> 0.9623). Saving model to /kaggle/working/best_resnet50_model.pth...
+
+Epoch 2/25
+----------
+Epoch 2 Summary: LR: 1.0e-04 | Train Loss: 0.1609 Acc: 0.9515 | Val Loss: 0.0687 Acc: 0.9811 | Time: 14.43s
+Validation accuracy improved (0.9623 --> 0.9811). Saving model to /kaggle/working/best_resnet50_model.pth...
+
+Epoch 3/25
+----------
+Epoch 3 Summary: LR: 1.0e-04 | Train Loss: 0.0767 Acc: 0.9811 | Val Loss: 0.0833 Acc: 0.9670 | Time: 14.21s
+Validation accuracy did not improve for 1 epoch(s). Best: 0.9811
+
+Epoch 4/25
+----------
+Epoch 4 Summary: LR: 1.0e-04 | Train Loss: 0.0932 Acc: 0.9693 | Val Loss: 0.0578 Acc: 0.9858 | Time: 14.20s
+Validation accuracy improved (0.9811 --> 0.9858). Saving model to /kaggle/working/best_resnet50_model.pth...
+
+Epoch 5/25
+----------
+Epoch 5 Summary: LR: 1.0e-04 | Train Loss: 0.0443 Acc: 0.9870 | Val Loss: 0.0557 Acc: 0.9811 | Time: 13.61s
+Validation accuracy did not improve for 1 epoch(s). Best: 0.9858
+
+Epoch 6/25
+----------
+Epoch 6 Summary: LR: 1.0e-04 | Train Loss: 0.0669 Acc: 0.9752 | Val Loss: 0.0463 Acc: 0.9717 | Time: 13.83s
+Validation accuracy did not improve for 2 epoch(s). Best: 0.9858
+
+Epoch 7/25
+----------
+Epoch 7 Summary: LR: 1.0e-04 | Train Loss: 0.0372 Acc: 0.9894 | Val Loss: 0.0393 Acc: 0.9811 | Time: 13.58s
+Validation accuracy did not improve for 3 epoch(s). Best: 0.9858
+
+Epoch 8/25
+----------
+Epoch 8 Summary: LR: 1.0e-04 | Train Loss: 0.0649 Acc: 0.9799 | Val Loss: 0.1048 Acc: 0.9623 | Time: 14.24s
+Validation accuracy did not improve for 4 epoch(s). Best: 0.9858
+
+Epoch 9/25
+----------
+Epoch 9 Summary: LR: 2.0e-05 | Train Loss: 0.0440 Acc: 0.9870 | Val Loss: 0.0343 Acc: 0.9906 | Time: 14.13s
+Validation accuracy improved (0.9858 --> 0.9906). Saving model to /kaggle/working/best_resnet50_model.pth...
+
+Epoch 10/25
+----------
+Epoch 10 Summary: LR: 2.0e-05 | Train Loss: 0.0187 Acc: 0.9941 | Val Loss: 0.0294 Acc: 0.9906 | Time: 14.37s
+Validation accuracy did not improve for 1 epoch(s). Best: 0.9906
+
+Epoch 11/25
+----------
+Epoch 11 Summary: LR: 2.0e-05 | Train Loss: 0.0164 Acc: 0.9917 | Val Loss: 0.0312 Acc: 0.9906 | Time: 13.84s
+Validation accuracy did not improve for 2 epoch(s). Best: 0.9906
+
+Epoch 12/25
+----------
+Epoch 12 Summary: LR: 2.0e-05 | Train Loss: 0.0176 Acc: 0.9965 | Val Loss: 0.0210 Acc: 0.9906 | Time: 14.13s
+Validation accuracy did not improve for 3 epoch(s). Best: 0.9906
+
+Epoch 13/25
+----------
+Epoch 13 Summary: LR: 2.0e-05 | Train Loss: 0.0186 Acc: 0.9941 | Val Loss: 0.0193 Acc: 0.9953 | Time: 14.10s
+Validation accuracy improved (0.9906 --> 0.9953). Saving model to /kaggle/working/best_resnet50_model.pth...
+
+Epoch 14/25
+----------
+Epoch 14 Summary: LR: 2.0e-05 | Train Loss: 0.0147 Acc: 0.9976 | Val Loss: 0.0177 Acc: 0.9953 | Time: 13.92s
+Validation accuracy did not improve for 1 epoch(s). Best: 0.9953
+
+Epoch 15/25
+----------
+Epoch 15 Summary: LR: 2.0e-05 | Train Loss: 0.0230 Acc: 0.9953 | Val Loss: 0.0198 Acc: 0.9953 | Time: 14.07s
+Validation accuracy did not improve for 2 epoch(s). Best: 0.9953
+
+Epoch 16/25
+----------
+Epoch 16 Summary: LR: 2.0e-05 | Train Loss: 0.0120 Acc: 0.9965 | Val Loss: 0.0208 Acc: 0.9953 | Time: 14.38s
+Validation accuracy did not improve for 3 epoch(s). Best: 0.9953
+
+Epoch 17/25
+----------
+Epoch 17 Summary: LR: 2.0e-05 | Train Loss: 0.0146 Acc: 0.9976 | Val Loss: 0.0215 Acc: 0.9906 | Time: 14.22s
+Validation accuracy did not improve for 4 epoch(s). Best: 0.9953
+
+Epoch 18/25
+----------
+Epoch 18 Summary: LR: 4.0e-06 | Train Loss: 0.0083 Acc: 0.9988 | Val Loss: 0.0210 Acc: 0.9906 | Time: 14.07s
+Validation accuracy did not improve for 5 epoch(s). Best: 0.9953
+
+Epoch 19/25
+----------
+Epoch 19 Summary: LR: 4.0e-06 | Train Loss: 0.0120 Acc: 0.9976 | Val Loss: 0.0179 Acc: 0.9953 | Time: 13.75s
+Validation accuracy did not improve for 6 epoch(s). Best: 0.9953
+
+Early stopping triggered after 19 epochs due to no improvement in validation accuracy.
+
+--- Training Finished ---
+Total Training Time: 4m 35s
+Best Validation Accuracy Achieved: 0.9953
+Loading best model weights from /kaggle/working/best_resnet50_model.pth...
+<ipython-input-1-ad40409bd5ab>:360: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  model.load_state_dict(torch.load(MODEL_SAVE_PATH))
+
+--- Generating Predictions on Test Set ---
+--- Creating Submission File ---
+Submission file saved to: /kaggle/working/submission.csv
+
+Submission Head:
+             Id          Label
+0  test_398.png   rotten_apple
+1   test_12.png  rotten_banana
+2  test_173.png  rotten_orange
+3  test_277.png   rotten_apple
+4  test_116.png   fresh_orange
+
+Sample Submission Head:
+           Id          Label
+0  test_1.png   fresh_banana
+1  test_2.png    fresh_apple
+2  test_3.png   fresh_orange
+3  test_4.png  rotten_banana
+4  test_5.png  rotten_banana
