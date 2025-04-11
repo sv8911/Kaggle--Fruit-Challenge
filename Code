@@ -13,7 +13,7 @@ from tqdm.notebook import tqdm # Use tqdm for progress bars in notebooks
 import time
 import copy
 
-# --- Configuration ---
+# -- Configuration --
 TRAIN_CSV_PATH = '/kaggle/input/fruit-classification/train.csv'
 TRAIN_IMG_DIR = '/kaggle/input/fruit-classification/train/train'
 TEST_IMG_DIR = '/kaggle/input/fruit-classification/test/test'
