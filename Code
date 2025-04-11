@@ -1,0 +1,492 @@
+import os
+import pandas as pd
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms, models
+from PIL import Image
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from tqdm.notebook import tqdm # Use tqdm for progress bars in notebooks
+import time
+import copy
+
+# --- Configuration ---
+TRAIN_CSV_PATH = '/kaggle/input/fruit-classification/train.csv'
+TRAIN_IMG_DIR = '/kaggle/input/fruit-classification/train/train'
+TEST_IMG_DIR = '/kaggle/input/fruit-classification/test/test'
+SUBMISSION_CSV_PATH = '/kaggle/working/submission.csv'
+MODEL_SAVE_PATH = '/kaggle/working/best_resnet50_model.pth' # Changed filename for clarity
+
+BATCH_SIZE = 32 # Keep batch size reasonable for ResNet50 memory
+SEED = 42
+VALIDATION_SPLIT = 0.2
+IMAGE_SIZE = 224 # Standard size for ResNet models
+NUM_CLASSES = 6
+LEARNING_RATE = 1e-4 # A good starting point for fine-tuning
+NUM_EPOCHS = 25 # ResNet50 might benefit from a few more epochs, adjust if needed
+PATIENCE = 6 # Slightly increased patience
+
+# Set random seeds for reproducibility
+torch.manual_seed(SEED)
+np.random.seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(SEED)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False # Set to False for full determinism, True might be faster but less deterministic
+
+# --- Device Setup ---
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
+# --- Transformations ---
+# Define the transformation pipeline
+# Using common ImageNet stats and augmentations suitable for ResNet
+train_transforms = transforms.Compose([
+    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+    transforms.RandomHorizontalFlip(p=0.5),
+    transforms.RandomRotation(20),
+    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+    transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), scale=(0.9, 1.1)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) # ImageNet stats
+])
+
+val_test_transforms = transforms.Compose([
+    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
+
+# --- Dataset Classes ---
+# Class for the training and validation datasets (with labels)
+class FruitDataset(Dataset):
+    def __init__(self, df, img_dir, transform=None, is_test=False):
+        self.df = df
+        self.img_dir = img_dir
+        self.transform = transform
+        self.is_test = is_test # Flag to handle label absence in test
+
+        # Create a label mapping only if not test set
+        if not self.is_test:
+            # Ensure consistent class order by sorting
+            self.classes = sorted(df['Label'].unique())
+            self.class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
+            self.idx_to_class = {idx: cls for cls, idx in self.class_to_idx.items()}
+            # Print mapping only once during dataset creation
+            # print("Class Mapping:", self.class_to_idx)
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        img_name = self.df.iloc[idx]['Id']
+        img_path = os.path.join(self.img_dir, img_name)
+
+        try:
+            # Handle both PNG and JPEG files, ensure RGB conversion (important for pretrained models)
+            image = Image.open(img_path).convert('RGB')
+        except FileNotFoundError:
+            print(f"Error: Image file not found at {img_path}")
+            # Return a dummy image and label/name if file not found
+            image = Image.new('RGB', (IMAGE_SIZE, IMAGE_SIZE), color = 'red')
+            if self.is_test:
+                # For test set, return the dummy image and the expected filename
+                return self.transform(image) if self.transform else image, img_name
+            else:
+                 # For train/val set, return dummy image and a placeholder label (e.g., 0)
+                 label_idx = 0
+                 return self.transform(image) if self.transform else image, label_idx
+        except Exception as e:
+             print(f"Error loading image {img_path}: {e}")
+             image = Image.new('RGB', (IMAGE_SIZE, IMAGE_SIZE), color = 'blue') # Different color for different error
+             if self.is_test:
+                return self.transform(image) if self.transform else image, img_name
+             else:
+                 label_idx = 0
+                 return self.transform(image) if self.transform else image, label_idx
+
+
+        if self.transform:
+            image = self.transform(image)
+
+        if self.is_test:
+            return image, img_name # Return image name for test set
+        else:
+            label = self.df.iloc[idx]['Label']
+            # Handle potential KeyError if a label wasn't seen during init (shouldn't happen with stratification)
+            label_idx = self.class_to_idx.get(label, -1) # Return -1 if label not found
+            if label_idx == -1:
+                print(f"Warning: Label '{label}' not found in class mapping for image {img_name}.")
+            return image, label_idx
+
+# --- Data Loaders ---
+def create_dataloaders():
+    # Read the training data CSV
+    train_df_full = pd.read_csv(TRAIN_CSV_PATH)
+    print(f"Full training dataset size: {len(train_df_full)}")
+
+    # Split into train and validation sets
+    train_df, val_df = train_test_split(
+        train_df_full,
+        test_size=VALIDATION_SPLIT,
+        random_state=SEED,
+        stratify=train_df_full['Label']  # Stratify to maintain class distribution
+    )
+    print(f"Training set size: {len(train_df)}")
+    print(f"Validation set size: {len(val_df)}")
+
+    # Create datasets
+    train_dataset = FruitDataset(train_df, TRAIN_IMG_DIR, transform=train_transforms)
+    val_dataset = FruitDataset(val_df, TRAIN_IMG_DIR, transform=val_test_transforms)
+
+    # Prepare test dataframe (list files in test directory)
+    test_files = [f for f in os.listdir(TEST_IMG_DIR) if os.path.isfile(os.path.join(TEST_IMG_DIR, f))]
+    test_df = pd.DataFrame({'Id': test_files})
+    print(f"Test set size: {len(test_df)}")
+    test_dataset = FruitDataset(test_df, TEST_IMG_DIR, transform=val_test_transforms, is_test=True)
+
+    # Get class names and mapping from the train_dataset instance
+    # This ensures the mapping used for training is also used for prediction
+    if hasattr(train_dataset, 'classes'):
+        classes = train_dataset.classes
+        idx_to_class = train_dataset.idx_to_class
+        print("Classes found:", classes)
+        print("Index to Class mapping:", idx_to_class)
+    else:
+        # Fallback if train_dataset failed somehow (should not happen)
+        print("Error: Could not get class information from training dataset.")
+        classes = ['class_0', 'class_1', 'class_2', 'class_3', 'class_4', 'class_5'] # Placeholder
+        idx_to_class = {i: f'class_{i}' for i in range(NUM_CLASSES)}
+
+
+    # Determine number of workers based on CPU cores, use slightly fewer to avoid overload
+    num_workers = max(0, os.cpu_count() // 2 - 1)
+    print(f"Using {num_workers} workers for DataLoaders.")
+
+    # Create dataloaders
+    train_loader = DataLoader(
+        train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=num_workers, pin_memory=True if device.type == 'cuda' else False
+    )
+
+    val_loader = DataLoader(
+        val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=num_workers, pin_memory=True if device.type == 'cuda' else False
+    )
+
+    test_loader = DataLoader(
+        test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=num_workers, pin_memory=True if device.type == 'cuda' else False
+    )
+
+    return train_loader, val_loader, test_loader, classes, idx_to_class
+
+# --- Model Definition ---
+def get_model(num_classes, pretrained=True):
+    # Load a pre-trained ResNet50 model
+    print(f"Loading ResNet50 (pretrained={pretrained})...")
+    model = models.resnet50(pretrained=pretrained)
+
+    # Replace the final fully connected layer
+    num_ftrs = model.fc.in_features
+    print(f"ResNet50 original FC layer input features: {num_ftrs}")
+    model.fc = nn.Linear(num_ftrs, num_classes)
+    print(f"Replaced FC layer with output features: {num_classes}")
+
+    return model.to(device)
+
+# --- Training Function ---
+def train_one_epoch(model, dataloader, criterion, optimizer, device):
+    model.train()  # Set model to training mode
+    running_loss = 0.0
+    running_corrects = 0
+    total_samples = 0
+
+    pbar = tqdm(dataloader, desc="Training", leave=False)
+    for inputs, labels in pbar:
+        # Ensure labels are valid (not -1 from potential dataset errors)
+        valid_indices = labels != -1
+        inputs = inputs[valid_indices].to(device)
+        labels = labels[valid_indices].to(device)
+
+        if inputs.size(0) == 0: # Skip batch if no valid samples remained
+            continue
+
+        # Zero the parameter gradients
+        optimizer.zero_grad()
+
+        # Forward pass
+        outputs = model(inputs)
+        _, preds = torch.max(outputs, 1)
+        loss = criterion(outputs, labels)
+
+        # Backward pass and optimize
+        loss.backward()
+        optimizer.step()
+
+        # Statistics
+        batch_loss = loss.item()
+        batch_corrects = torch.sum(preds == labels.data).item()
+        batch_size = inputs.size(0)
+
+        running_loss += batch_loss * batch_size
+        running_corrects += batch_corrects
+        total_samples += batch_size
+
+        # Update progress bar postfix with running averages
+        pbar.set_postfix({
+            'batch_loss': f"{batch_loss:.4f}",
+            'avg_loss': f"{running_loss / total_samples:.4f}",
+            'avg_acc': f"{running_corrects / total_samples:.4f}"
+        })
+
+    epoch_loss = running_loss / total_samples if total_samples > 0 else 0
+    epoch_acc = running_corrects / total_samples if total_samples > 0 else 0
+
+    return epoch_loss, epoch_acc
+
+# --- Validation Function ---
+def validate(model, dataloader, criterion, device):
+    model.eval()  # Set model to evaluation mode
+    running_loss = 0.0
+    running_corrects = 0
+    total_samples = 0
+
+    pbar = tqdm(dataloader, desc="Validation", leave=False)
+    with torch.no_grad(): # No gradients needed for validation
+        for inputs, labels in pbar:
+            # Ensure labels are valid
+            valid_indices = labels != -1
+            inputs = inputs[valid_indices].to(device)
+            labels = labels[valid_indices].to(device)
+
+            if inputs.size(0) == 0:
+                continue
+
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1)
+            loss = criterion(outputs, labels)
+
+            # Statistics
+            batch_loss = loss.item()
+            batch_corrects = torch.sum(preds == labels.data).item()
+            batch_size = inputs.size(0)
+
+            running_loss += batch_loss * batch_size
+            running_corrects += batch_corrects
+            total_samples += batch_size
+
+            # Update progress bar postfix
+            pbar.set_postfix({
+                'avg_loss': f"{running_loss / total_samples:.4f}",
+                'avg_acc': f"{running_corrects / total_samples:.4f}"
+             })
+
+    epoch_loss = running_loss / total_samples if total_samples > 0 else 0
+    epoch_acc = running_corrects / total_samples if total_samples > 0 else 0
+
+    return epoch_loss, epoch_acc
+
+# --- Main Training Loop ---
+def run_training():
+    train_loader, val_loader, _, classes, _ = create_dataloaders() # Get loaders and class info
+    print(f"\nNumber of training batches: {len(train_loader)}")
+    print(f"Number of validation batches: {len(val_loader)}")
+    print(f"Target Classes: {classes}")
+
+    model = get_model(num_classes=NUM_CLASSES, pretrained=True)
+
+    criterion = nn.CrossEntropyLoss()
+    # Use AdamW optimizer which often works well with transformers and CNNs
+    # Weight decay acts as L2 regularization
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-3)
+
+    # Learning rate scheduler - reduce LR when validation accuracy plateaus
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.2, patience=PATIENCE // 2, verbose=True)
+
+    best_model_wts = copy.deepcopy(model.state_dict())
+    best_acc = 0.0
+    epochs_no_improve = 0
+    history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
+
+    start_time = time.time()
+
+    print("\n--- Starting Training ---")
+    for epoch in range(NUM_EPOCHS):
+        epoch_start_time = time.time()
+        print(f"\nEpoch {epoch+1}/{NUM_EPOCHS}")
+        print('-' * 10)
+
+        # Train
+        train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
+        history['train_loss'].append(train_loss)
+        history['train_acc'].append(train_acc)
+
+        # Validate
+        val_loss, val_acc = validate(model, val_loader, criterion, device)
+        history['val_loss'].append(val_loss)
+        history['val_acc'].append(val_acc)
+
+        epoch_time = time.time() - epoch_start_time
+        current_lr = optimizer.param_groups[0]['lr'] # Get current learning rate
+        print(f"Epoch {epoch+1} Summary: LR: {current_lr:.1e} | Train Loss: {train_loss:.4f} Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f} Acc: {val_acc:.4f} | Time: {epoch_time:.2f}s")
+
+        # Update the learning rate scheduler based on validation accuracy
+        scheduler.step(val_acc)
+
+        # Check for improvement and save best model
+        if val_acc > best_acc:
+            print(f"Validation accuracy improved ({best_acc:.4f} --> {val_acc:.4f}). Saving model to {MODEL_SAVE_PATH}...")
+            best_acc = val_acc
+            best_model_wts = copy.deepcopy(model.state_dict())
+            torch.save(best_model_wts, MODEL_SAVE_PATH)
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+            print(f"Validation accuracy did not improve for {epochs_no_improve} epoch(s). Best: {best_acc:.4f}")
+
+        # Early stopping condition
+        if epochs_no_improve >= PATIENCE:
+            print(f"\nEarly stopping triggered after {epoch + 1} epochs due to no improvement in validation accuracy.")
+            break
+
+    total_time = time.time() - start_time
+    print(f"\n--- Training Finished ---")
+    print(f"Total Training Time: {total_time // 60:.0f}m {total_time % 60:.0f}s")
+    print(f"Best Validation Accuracy Achieved: {best_acc:.4f}")
+
+    # Load the best performing model weights back into the model
+    print(f"Loading best model weights from {MODEL_SAVE_PATH}...")
+    model.load_state_dict(torch.load(MODEL_SAVE_PATH))
+
+    return model, history, classes
+
+# --- Prediction Function ---
+def predict(model, dataloader, device, idx_to_class):
+    model.eval() # Set model to evaluation mode
+    predictions = []
+    file_ids = [] # Store corresponding file IDs
+
+    pbar = tqdm(dataloader, desc="Predicting", leave=False)
+    with torch.no_grad(): # Disable gradient calculations for inference
+        for inputs, img_names in pbar:
+            inputs = inputs.to(device)
+
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1) # Get the index of the max logit
+
+            # Map predicted indices back to class names
+            predicted_labels = [idx_to_class.get(idx.item(), "unknown_class") for idx in preds] # Use .get for safety
+            predictions.extend(predicted_labels)
+            file_ids.extend(img_names) # img_names comes directly from the dataloader
+
+    # Create DataFrame from results
+    results_df = pd.DataFrame({'Id': file_ids, 'Label': predictions})
+    return results_df
+
+
+# --- Plotting Function ---
+def plot_history(history):
+    if not history: # Check if history is empty (e.g., if model was loaded)
+        print("No training history to plot.")
+        return
+
+    epochs = range(1, len(history['train_loss']) + 1)
+
+    plt.figure(figsize=(14, 6))
+
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, history['train_loss'], 'bo-', label='Training Loss')
+    plt.plot(epochs, history['val_loss'], 'ro-', label='Validation Loss')
+    plt.title('Training and Validation Loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, history['train_acc'], 'bo-', label='Training Accuracy')
+    plt.plot(epochs, history['val_acc'], 'ro-', label='Validation Accuracy')
+    plt.title('Training and Validation Accuracy')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.grid(True)
+    # Add horizontal line for target accuracy
+    plt.axhline(y=0.92, color='g', linestyle='--', label='92% Target Accuracy')
+    plt.legend()
+
+
+    plt.tight_layout()
+    plt.show()
+
+# --- Main Execution ---
+if __name__ == '__main__':
+    # Initialize variables
+    model = None
+    history = None
+    classes = None
+    idx_to_class = None
+    test_loader = None
+
+    # 1. Train the model (or load if already trained)
+    if os.path.exists(MODEL_SAVE_PATH) and os.path.getsize(MODEL_SAVE_PATH) > 0:
+         print(f"Found existing model at {MODEL_SAVE_PATH}. Loading it.")
+         # Need to create dataloaders first to get class mapping etc.
+         _, val_loader, test_loader, classes, idx_to_class = create_dataloaders()
+         model = get_model(num_classes=NUM_CLASSES, pretrained=False) # Load architecture, but not pretrained weights
+         try:
+             model.load_state_dict(torch.load(MODEL_SAVE_PATH, map_location=device))
+             print("Model weights loaded successfully.")
+             # Optionally run validation once on the loaded model
+             print("Running validation on loaded model...")
+             criterion = nn.CrossEntropyLoss()
+             val_loss, val_acc = validate(model, val_loader, criterion, device)
+             print(f"Loaded Model Validation -> Loss: {val_loss:.4f} | Accuracy: {val_acc:.4f}")
+         except Exception as e:
+              print(f"Error loading model weights: {e}. Retraining...")
+              model = None # Reset model to trigger training
+              # Clear potentially corrupted file
+              if os.path.exists(MODEL_SAVE_PATH): os.remove(MODEL_SAVE_PATH)
+
+    # If model wasn't loaded successfully or doesn't exist, train it
+    if model is None:
+         print("No valid existing model found or error loading. Starting training...")
+         # Need train_loader if training
+         train_loader, val_loader, test_loader, classes, idx_to_class = create_dataloaders()
+         model, history, loaded_classes = run_training()
+         # Verify classes match if loaded
+         if classes != loaded_classes:
+             print("Warning: Class mismatch between dataloader and training routine!")
+         plot_history(history) # Plot training curves only if we trained
+
+    # Ensure we have the test_loader and idx_to_class if model was loaded without training call
+    if test_loader is None or idx_to_class is None:
+        print("Recreating test loader and class mapping...")
+        _, _, test_loader, classes, idx_to_class = create_dataloaders()
+
+
+    # 2. Make predictions on the test set
+    if model is not None and test_loader is not None and idx_to_class is not None:
+        print("\n--- Generating Predictions on Test Set ---")
+        submission_df = predict(model, test_loader, device, idx_to_class)
+
+        # 3. Create submission file
+        print("\n--- Creating Submission File ---")
+        # Optional: Sort by Id if the dataloader order isn't guaranteed (usually is, but good practice)
+        # submission_df = submission_df.sort_values(by='Id').reset_index(drop=True)
+
+        submission_df.to_csv(SUBMISSION_CSV_PATH, index=False)
+        print(f"Submission file saved to: {SUBMISSION_CSV_PATH}")
+        print("\nSubmission Head:")
+        print(submission_df.head())
+
+        # Display sample submission file structure for comparison
+        try:
+            sample_sub = pd.read_csv('/kaggle/input/fruit-classification/sample_submission.csv')
+            print("\nSample Submission Head:")
+            print(sample_sub.head())
+        except FileNotFoundError:
+            print("\nSample submission file not found at /kaggle/input/fruit-classification/sample_submission.csv")
+    else:
+        print("Skipping prediction and submission file creation due to missing model, test loader, or class mapping.")
